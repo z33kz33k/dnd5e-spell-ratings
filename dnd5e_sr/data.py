@@ -9,11 +9,16 @@
 
 """
 
+# DEBUG
+from pprint import pprint
+from itertools import count
+
+
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from pprint import pprint  # DEBUG
-from typing import List, Optional, Dict, Any, Union
+from random import randint
+from typing import List, Optional, Dict, Any, Tuple, Union
 
 Json = Dict[str, Any]
 
@@ -90,6 +95,88 @@ class DescriptionTable:
 
 
 Description = Union[str, List[str], DescriptionQuote, DescriptionTable, DescriptionTable]
+
+
+class Dice:
+    """A dice formula that can roll itself.
+    """
+    DIE_CHAR = "d"
+
+    def __init__(self, formula: str) -> None:
+        self._formula = formula
+        self.multiplier, self.die, self.operator, self.modifier = self._parse()
+
+    def _parse(self) -> Tuple[Optional[int], int, Optional[str], Optional[int]]:
+        """Parse the input formula for an multiplier, a die, an operator and a modifier.
+        """
+        if self._formula.count(self.DIE_CHAR) != 1:
+            raise ValueError(f"Not one '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
+        multiplier, die = self._formula.split(self.DIE_CHAR)
+        multiplier = int(multiplier) if multiplier else None
+
+        if "+" in die:
+            operator = "+"
+            die, modifier = die.split(operator)
+        elif "-" in die:
+            operator = "-"
+            die, modifier = die.split(operator)
+        else:
+            operator, modifier = None, None
+
+        die = int(die.strip())
+
+        if modifier:
+            if "{" in modifier:
+                modifier = None
+            else:
+                modifier = int(modifier.strip())
+
+        return multiplier, die, operator, modifier
+
+    @property
+    def formula(self) -> str:
+        """Return formula as parsed.
+        """
+        operator = self.operator if self.operator else ""
+        modifier = self.modifier if self.modifier else ""
+        if self.operator and not self.modifier:
+            modifier = "modifier"
+
+        return f"{self.multiplier}{self.DIE_CHAR}{self.die}{operator}{modifier}"
+
+    @property
+    def roll_results(self) -> List[int]:
+        """Return list of roll results.
+        """
+        return [randint(1, self.die) for _ in range(self.multiplier)]
+
+    def roll(self) -> int:
+        """Roll a numerical result of the formula of this dice.
+        """
+        result = sum(self.roll_results)
+        if self.operator and self.operator == "+":
+            return result + (self.modifier if self.modifier else 0)
+        elif self.operator and self.operator == "-":
+            return result - (self.modifier if self.modifier else 0)
+        else:
+            return result
+
+    def roll_as_text(self) -> str:
+        """Roll a textual result of the formula of this dice.
+        """
+        results = self.roll_results
+        total = sum(results)
+        text_results = f"+".join([f"[{result}]" for result in results])
+        roll = f"{total} ({text_results})"
+        if self.modifier:
+            if self.operator and self.operator == "+":
+                total += self.modifier
+                roll = f"{total} ({text_results} + {self.modifier})"
+            elif self.operator and self.operator == "-":
+                total -= self.modifier
+                roll = f"{total} ({text_results} - {self.modifier})"
+
+        return roll
 
 
 # areaTags: S (sphere), N (cone), ST (single target), MT (multi target), H (hemisphere),
@@ -230,13 +317,16 @@ def parse(filename: str) -> None:
         # srd = [spell["name"] for spell in spells if spell.get("srd") is None]
         # entries = [(spell["name"], spell["entries"]) for spell in spells
         #            if any(type(e) is dict for e in spell["entries"])]
-
         # entries = [(spell["name"], [n for n in spell["entries"]
         #             if type(n) is dict and n["type"] == "table"])
         #            for spell in spells
         #            if any(type(e) is dict for e in spell["entries"])]
 
-        spells = [Spell(spell) for spell in spells]
+        counter = count(start=1)
+        comps = [(next(counter), spell["name"], spell["scalingLevelDice"]) for spell in spells
+                 if spell.get("scalingLevelDice")]
+
+        # spells = [Spell(spell) for spell in spells]
 
     # pprint(ranges)
     # pprint(f"Number of parsed spell names: {len(names)}")
@@ -244,9 +334,9 @@ def parse(filename: str) -> None:
     # pprint(times)
     # pprint(sorted(ranges, key=lambda r: r[0]))
     # pprint(sorted(schools, key=lambda s: s[1]))
-    # pprint(comps)
     # pprint(durations)
     # pprint(srd)
     # pprint(entries)
+    pprint(comps)
 
-    pprint(spells)
+    # pprint(spells)
