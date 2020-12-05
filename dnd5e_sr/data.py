@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from pprint import pprint  # DEBUG
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 Json = Dict[str, Any]
 
@@ -22,7 +22,7 @@ Json = Dict[str, Any]
 
 
 @dataclass
-class Time:  # works also duration subcomponent of duration in json
+class Time:  # works also for duration subcomponent of JSOn duration
     amount: int
     unit: str
     condition: Optional[str]
@@ -64,6 +64,39 @@ class Duration:
     terminations: List[str]
 
 
+# spell description is called 'entries' in JSON and is a list of paragraphs that can be either: a
+# string, a list of strings (called 'items' and rendered as bullet points on the page), a quote (
+# having an author and its own paragraphs), a subsection (having a name and its own paragraphs) or
+# a table (having a caption, a list of column labels and a list of rows (each a list of strings)
+
+
+@dataclass
+class DescriptionQuote:
+    paragraphs: List[str]
+    by: str
+
+
+@dataclass
+class DescriptionSubsection:
+    name: str
+    paragraphs: List[str]
+
+
+@dataclass
+class DescriptionTable:
+    caption: Optional[str]
+    col_labels: List[str]
+    rows: List[List[str]]
+
+
+Description = Union[str, List[str], DescriptionQuote, DescriptionTable, DescriptionTable]
+
+
+# areaTags: S (sphere), N (cone), ST (single target), MT (multi target), H (hemisphere),
+# L (line), W (wall)
+# miscTags: SGT (seeing target), SCL (scalable), HL (healing influencing), SMN (summon),
+# PRM (permanent), TP (teleportation)
+
 SCHOOLSMAP = {
     "A": "Abjuration",
     "C": "Conjuration",
@@ -98,12 +131,14 @@ class Spell:
         self.is_ritual: bool = self._json.get("meta") is not None
         self.components: Components = self._getcomponents()
         self.durations: List[Duration] = self._getdurations()
+        self.descriptions: List[Description] = self._getdescriptions()
 
     def __repr__(self) -> str:
-        return f"{type(self)}(name='{self.name}', source='{self.source}', page='{self.page}', " \
-               f"in_srd='{self.in_srd}', level='{self.level}', school='{self.school}', " \
-               f"times='{self.times}', range='{self.range}', is_ritual='{self.is_ritual}', " \
-               f"components='{self.components}', durations='{self.durations}')"
+        return f"{type(self).__name__}(name='{self.name}', source='{self.source}', " \
+               f"page='{self.page}', in_srd='{self.in_srd}', level='{self.level}', " \
+               f"school='{self.school}', times='{self.times}', range='{self.range}', " \
+               f"is_ritual='{self.is_ritual}', components='{self.components}', " \
+               f"durations='{self.durations}'), descriptions='{self.descriptions}'"
 
     def _gettimes(self) -> List[Time]:
         return [Time(time["number"], time["unit"], time.get("condition"), False)
@@ -142,6 +177,25 @@ class Spell:
 
         return durations
 
+    def _getdescriptions(self) -> List[Description]:
+        descs = []
+        for entry in self._json["entries"]:
+            if type(entry) is str:
+                descs.append(entry)
+
+            else:  # it's dict then
+                if entry["type"] == "list":
+                    descs.append(entry["items"])
+                elif entry["type"] == "quote":
+                    descs.append(DescriptionQuote(entry["entries"], entry["by"]))
+                elif entry["type"] == "entries":
+                    descs.append(DescriptionSubsection(entry["name"], entry["entries"]))
+                elif entry["type"] == "table":
+                    descs.append(DescriptionTable(
+                        entry.get("caption"), entry["colLabels"], entry["rows"]))
+
+        return descs
+
 
 def parse(filename: str) -> None:
     """Parse data from file designated by filename.
@@ -174,6 +228,14 @@ def parse(filename: str) -> None:
         # comps = [(spell["name"], spell["components"]) for spell in spells]
         # durations = [(spell["name"], spell["duration"]) for spell in spells]
         # srd = [spell["name"] for spell in spells if spell.get("srd") is None]
+        # entries = [(spell["name"], spell["entries"]) for spell in spells
+        #            if any(type(e) is dict for e in spell["entries"])]
+
+        # entries = [(spell["name"], [n for n in spell["entries"]
+        #             if type(n) is dict and n["type"] == "table"])
+        #            for spell in spells
+        #            if any(type(e) is dict for e in spell["entries"])]
+
         spells = [Spell(spell) for spell in spells]
 
     # pprint(ranges)
@@ -185,4 +247,6 @@ def parse(filename: str) -> None:
     # pprint(comps)
     # pprint(durations)
     # pprint(srd)
+    # pprint(entries)
+
     pprint(spells)
