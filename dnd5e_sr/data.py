@@ -15,19 +15,67 @@ from itertools import count
 
 
 from dataclasses import dataclass
+from enum import Enum
 import json
 from pathlib import Path
 from random import randint
 from typing import List, Optional, Dict, Any, Tuple, Union
 
+# boolean key appears in JSON only if its value is 'true'
 Json = Dict[str, Any]
 
 
-# boolean key appears in JSON only if its value is 'true'
+SCHOOLSMAP = {
+    "A": "Abjuration",
+    "C": "Conjuration",
+    "D": "Divination",
+    "E": "Enchantment",
+    "I": "Illusion",
+    "N": "Necromancy",
+    "T": "Transmutation",
+    "V": "Evocation",
+}
+
+AOE_TAGS_MAP = {
+    "C": "cube",
+    "H": "hemisphere",
+    "L": "line",
+    "MT": "multiple targets",
+    "N": "cone",
+    "Q": "square",
+    "R": "circle",
+    "S": "sphere",
+    "ST": "single target",
+    "W": "wall",
+    "Y": "cylinder",
+}
+
+MISC_TAGS_MAP = {
+    "HL": "healing",
+    "MAC": "modifies AC",
+    "PRM": "permanent effects",
+    "SCL": "scaling effects",
+    "SGT": "requires sight",
+    "SMN": "summons creature",
+    "THP": "grants temporary hit points",
+    "TP": "teleportation",
+}
+
+ATTRIBUTES = ["name", "source", "page", "srd", "level", "school", "time", "range", "components",
+              "duration", "meta", "entries", "entriesHigherLevel", "scalingLevelDice",
+              "conditionInflict", "damageInflict", "damageResist", "damageImmune",
+              "damageVulnerable", "savingThrow", "spellAttack", "abilityCheck", "miscTags",
+              "areaTags", "classes", "races", "backgrounds", "eldritchInvocations", "otherSources"]
+
+
+class AttackType(Enum):
+    NONE = 0
+    MELEE = 1
+    RANGED = 2
 
 
 @dataclass
-class Time:  # works also for duration subcomponent of JSOn duration
+class Time:  # works also for duration subcomponent of JSON duration
     amount: int
     unit: str
     condition: Optional[str]
@@ -106,13 +154,29 @@ class Dice:
         self._formula = formula
         self.multiplier, self.die, self.operator, self.modifier = self._parse()
 
+    def _validate_input(self) -> None:
+        try:
+            index = self._formula.index(self.DIE_CHAR)
+        except ValueError:
+            raise ValueError(f"No '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
+
+        if index == len(self._formula) or not self._formula[index + 1].isdigit():
+            raise ValueError(f"Invalid formula: '{self._formula}'")
+
+        if self._formula.count(self.DIE_CHAR) > 1:
+            raise ValueError(f"More than one '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
+
     def _parse(self) -> Tuple[Optional[int], int, Optional[str], Optional[int]]:
         """Parse the input formula for an multiplier, a die, an operator and a modifier.
         """
-        if self._formula.count(self.DIE_CHAR) != 1:
-            raise ValueError(f"Not one '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
+        self._validate_input()
+
         multiplier, die = self._formula.split(self.DIE_CHAR)
-        multiplier = int(multiplier) if multiplier else None
+
+        if multiplier and "{" in multiplier:
+            multiplier = "multiplier"
+        else:
+            multiplier = int(multiplier) if multiplier else None
 
         if "+" in die:
             operator = "+"
@@ -137,18 +201,23 @@ class Dice:
     def formula(self) -> str:
         """Return formula as parsed.
         """
+        if self.multiplier == "multiplier":
+            multiplier = f"{self.multiplier}*"
+        else:
+            multiplier = self.multiplier if self.multiplier else ""
         operator = self.operator if self.operator else ""
         modifier = self.modifier if self.modifier else ""
         if self.operator and not self.modifier:
             modifier = "modifier"
 
-        return f"{self.multiplier}{self.DIE_CHAR}{self.die}{operator}{modifier}"
+        return f"{multiplier}{self.DIE_CHAR}{self.die}{operator}{modifier}"
 
     @property
     def roll_results(self) -> List[int]:
         """Return list of roll results.
         """
-        return [randint(1, self.die) for _ in range(self.multiplier)]
+        multiplier = 0 if not self.multiplier or self.multiplier == "multipier" else self.multiplier
+        return [randint(1, self.die) for _ in range(multiplier)]
 
     def roll(self) -> int:
         """Roll a numerical result of the formula of this dice.
@@ -178,22 +247,23 @@ class Dice:
 
         return roll
 
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}('{self.formula}')"
+
+    def __str__(self) -> str:
+        return self.formula
+
+
+@dataclass
+class ScalingDice:
+    label: str
+    scalingmap: Dict[int, Union[Dice, str]]
+
 
 # areaTags: S (sphere), N (cone), ST (single target), MT (multi target), H (hemisphere),
 # L (line), W (wall)
 # miscTags: SGT (seeing target), SCL (scalable), HL (healing influencing), SMN (summon),
 # PRM (permanent), TP (teleportation)
-
-SCHOOLSMAP = {
-    "A": "Abjuration",
-    "C": "Conjuration",
-    "D": "Divination",
-    "E": "Enchantment",
-    "I": "Illusion",
-    "N": "Necromancy",
-    "T": "Transmutation",
-    "V": "Evocation",
-}
 
 
 class Spell:
@@ -219,13 +289,51 @@ class Spell:
         self.components: Components = self._getcomponents()
         self.durations: List[Duration] = self._getdurations()
         self.descriptions: List[Description] = self._getdescriptions()
+        self.higher_lvl_desc: Optional[DescriptionSubsection] = self._get_higher_lvl_desc()
+        self.scaling_dice: List[ScalingDice] = self._get_scaling_dice()
+        self.misc_tags: List[str] = self._get_misc_tags()
+        self.aoe_tags: List[str] = self._get_aoe_tags()
+        self.inflicted_conditions: List[str] = self._get_inflicted_conditions()
+        self.dmg_types_inflicted: List[str] = self._get_dmg_types_inflicted()
+        self.dmg_types_resisted: List[str] = self._get_dmg_types_resisted()
+        self.dmg_types_vulnerable: List[str] = self._get_dmg_types_vulnerable()
+        self.dmg_types_immune: List[str] = self._get_dmg_types_immune()
+        self.saving_throws: List[str] = self._get_saving_throws()
+        self.attack_type: AttackType = self._get_attack_type()
+        self.ability_checks: List[str] = self._get_ability_checks()
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(name='{self.name}', source='{self.source}', " \
+        result = f"{type(self).__name__}(name='{self.name}', source='{self.source}', " \
                f"page='{self.page}', in_srd='{self.in_srd}', level='{self.level}', " \
                f"school='{self.school}', times='{self.times}', range='{self.range}', " \
                f"is_ritual='{self.is_ritual}', components='{self.components}', " \
                f"durations='{self.durations}'), descriptions='{self.descriptions}'"
+        if self.higher_lvl_desc:
+            result += f", higher_lvl_desc={self.higher_lvl_desc}"
+        if self.scaling_dice:
+            result += f", scaling_dice={self.scaling_dice}"
+        if self.misc_tags:
+            result += f", misc_tags={self.misc_tags}"
+        if self.aoe_tags:
+            result += f", aoe_tags={self.aoe_tags}"
+        if self.inflicted_conditions:
+            result += f", inflicted_conditions={self.inflicted_conditions}"
+        if self.dmg_types_inflicted:
+            result += f", dmg_types_inflicted={self.dmg_types_inflicted}"
+        if self.dmg_types_resisted:
+            result += f", dmg_types_resisted={self.dmg_types_resisted}"
+        if self.dmg_types_vulnerable:
+            result += f", dmg_types_vulnerable={self.dmg_types_vulnerable}"
+        if self.dmg_types_immune:
+            result += f", dmg_types_immune={self.dmg_types_immune}"
+        if self.saving_throws:
+            result += f", saving_throws={self.saving_throws}"
+        if self.attack_type is not AttackType.NONE:
+            result += f", attack_type={self.attack_type}"
+        if self.ability_checks:
+            result += f", ability_checks={self.ability_checks}"
+
+        return result + ")"
 
     def _gettimes(self) -> List[Time]:
         return [Time(time["number"], time["unit"], time.get("condition"), False)
@@ -283,6 +391,82 @@ class Spell:
 
         return descs
 
+    def _get_higher_lvl_desc(self) -> Optional[DescriptionSubsection]:
+        desc = self._json.get("entriesHigherLevel")
+        if desc:
+            desc = desc[0]
+            desc = DescriptionSubsection(desc["name"], desc["entries"])
+        return desc
+
+    def _get_scaling_dice(self) -> List[ScalingDice]:
+        def getdice(json_dict: Json) -> ScalingDice:
+            resultdict = {}
+            for k, v in json_dict["scaling"].items():
+                try:
+                    dice = Dice(v)
+                except ValueError:
+                    dice = "modifier"
+                resultdict.update({k: dice})
+
+            return ScalingDice(json_dict["label"], resultdict)
+
+        scaling_dice = self._json.get("scalingLevelDice")
+        results = []
+        if scaling_dice:
+            if type(scaling_dice) is list:
+                for die in scaling_dice:
+                    results.append(getdice(die))
+            else:
+                results.append(getdice(scaling_dice))
+
+        return results
+
+    def _get_misc_tags(self) -> List[str]:
+        tags = self._json.get("miscTags")
+        return [] if not tags else [MISC_TAGS_MAP[tag] for tag in tags]
+
+    def _get_aoe_tags(self) -> List[str]:
+        tags = self._json.get("areaTags")
+        return [] if not tags else [AOE_TAGS_MAP[tag] for tag in tags]
+
+    def _get_inflicted_conditions(self) -> List[str]:
+        conditions = self._json.get("conditionInflict")
+        return conditions if conditions else []
+
+    def _get_dmg_types_inflicted(self) -> List[str]:
+        dmg_types_inflicted = self._json.get("damageInflict")
+        return dmg_types_inflicted if dmg_types_inflicted else []
+
+    def _get_dmg_types_resisted(self) -> List[str]:
+        dmg_types_resisted = self._json.get("damageResist")
+        return dmg_types_resisted if dmg_types_resisted else []
+
+    def _get_dmg_types_vulnerable(self) -> List[str]:
+        dmg_types_vulnerable = self._json.get("damageVulnerable")
+        return dmg_types_vulnerable if dmg_types_vulnerable else []
+
+    def _get_dmg_types_immune(self) -> List[str]:
+        dmg_types_immune = self._json.get("damageImmune")
+        return dmg_types_immune if dmg_types_immune else []
+
+    def _get_saving_throws(self) -> List[str]:
+        throws = self._json.get("savingThrow")
+        return throws if throws else []
+
+    def _get_attack_type(self) -> AttackType:
+        attack = self._json.get("spellAttack")
+        if attack is not None:
+            if attack[0] == "M":
+                return AttackType.MELEE
+            else:
+                return AttackType.RANGED
+        else:
+            return AttackType.NONE
+
+    def _get_ability_checks(self) -> List[str]:
+        checks = self._json.get("abilityCheck")
+        return checks if checks else []
+
 
 def parse(filename: str) -> None:
     """Parse data from file designated by filename.
@@ -321,22 +505,34 @@ def parse(filename: str) -> None:
         #             if type(n) is dict and n["type"] == "table"])
         #            for spell in spells
         #            if any(type(e) is dict for e in spell["entries"])]
+        #
+        # counter = count(start=1)
+        # result = [(next(counter), spell["name"], spell["scalingLevelDice"]) for spell in spells
+        #           if spell.get("scalingLevelDice")
+        #           and type(spell["scalingLevelDice"]) is not dict]
+        # counter = count(start=1)
+        # result = [(next(counter), spell["name"], spell["areaTags"]) for spell in spells
+        #          if spell.get("areaTags")
+        #          and any(tag not in AOE_TAGS_MAP.keys() for tag in spell["areaTags"])]
 
-        counter = count(start=1)
-        comps = [(next(counter), spell["name"], spell["scalingLevelDice"]) for spell in spells
-                 if spell.get("scalingLevelDice")]
+        # counter = count(start=1)
+        # result = [(next(counter), spell["name"], spell["miscTags"]) for spell in spells
+        #           if spell.get("miscTags")
+        #           and any(tag not in MISC_TAGS_MAP.keys() for tag in spell["miscTags"])]
 
-        # spells = [Spell(spell) for spell in spells]
+        # counter = count(start=1)
+        # result = [(next(counter), spell["name"], spell["entriesHigherLevel"][0]) for spell in
+        # spells
+        #           if spell.get("entriesHigherLevel")
+        #           and any(key not in ("entries", "name", "type") for key
+        #                   in spell["entriesHigherLevel"][0].keys())]
 
-    # pprint(ranges)
-    # pprint(f"Number of parsed spell names: {len(names)}")
-    # pprint(compnames)
-    # pprint(times)
-    # pprint(sorted(ranges, key=lambda r: r[0]))
-    # pprint(sorted(schools, key=lambda s: s[1]))
-    # pprint(durations)
-    # pprint(srd)
-    # pprint(entries)
-    pprint(comps)
+        # counter = count(start=1)
+        # result = [(next(counter), spell["name"], spell["abilityCheck"]) for spell in spells
+        #           if spell.get("abilityCheck")]
+        #
+        spells = [Spell(spell) for spell in spells]
 
-    # pprint(spells)
+    # pprint(result)
+    #
+    pprint(spells)
