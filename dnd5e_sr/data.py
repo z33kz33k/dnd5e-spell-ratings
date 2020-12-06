@@ -61,11 +61,12 @@ MISC_TAGS_MAP = {
     "TP": "teleportation",
 }
 
-ATTRIBUTES = ["name", "source", "page", "srd", "level", "school", "time", "range", "components",
-              "duration", "meta", "entries", "entriesHigherLevel", "scalingLevelDice",
-              "conditionInflict", "damageInflict", "damageResist", "damageImmune",
-              "damageVulnerable", "savingThrow", "spellAttack", "abilityCheck", "miscTags",
-              "areaTags", "classes", "races", "backgrounds", "eldritchInvocations", "otherSources"]
+JSON_ATTRIBUTES = ["name", "source", "page", "srd", "level", "school", "time", "range",
+                   "components", "duration", "meta", "entries", "entriesHigherLevel",
+                   "scalingLevelDice", "conditionInflict", "damageInflict", "damageResist",
+                   "damageImmune", "damageVulnerable", "savingThrow", "spellAttack",
+                   "abilityCheck", "miscTags", "areaTags", "classes", "races", "backgrounds",
+                   "eldritchInvocations", "otherSources"]
 
 
 class AttackType(Enum):
@@ -120,9 +121,8 @@ class Duration:
 # spell description is called 'entries' in JSON and is a list of paragraphs that can be either: a
 # string, a list of strings (called 'items' and rendered as bullet points on the page), a quote (
 # having an author and its own paragraphs), a subsection (having a name and its own paragraphs) or
-# a table (having a caption, a list of column labels and a list of rows (each a list of strings)
-
-
+# a table (having a caption (optional), a list of column labels and a list of rows (each a list of
+# strings))
 @dataclass
 class DescriptionQuote:
     paragraphs: List[str]
@@ -167,7 +167,7 @@ class Dice:
             raise ValueError(f"More than one '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
 
     def _parse(self) -> Tuple[Optional[int], int, Optional[str], Optional[int]]:
-        """Parse the input formula for an multiplier, a die, an operator and a modifier.
+        """Parse the input formula for a multiplier, a die, an operator and a modifier.
         """
         self._validate_input()
 
@@ -191,7 +191,7 @@ class Dice:
 
         if modifier:
             if "{" in modifier:
-                modifier = None
+                modifier = "modifier"
             else:
                 modifier = int(modifier.strip())
 
@@ -207,8 +207,6 @@ class Dice:
             multiplier = self.multiplier if self.multiplier else ""
         operator = self.operator if self.operator else ""
         modifier = self.modifier if self.modifier else ""
-        if self.operator and not self.modifier:
-            modifier = "modifier"
 
         return f"{multiplier}{self.DIE_CHAR}{self.die}{operator}{modifier}"
 
@@ -224,9 +222,11 @@ class Dice:
         """
         result = sum(self.roll_results)
         if self.operator and self.operator == "+":
-            return result + (self.modifier if self.modifier else 0)
+            return result + (0 if not self.modifier or self.modifier == "modifier"
+                             else self.modifier)
         elif self.operator and self.operator == "-":
-            return result - (self.modifier if self.modifier else 0)
+            return result - (0 if not self.modifier or self.modifier == "modifier"
+                             else self.modifier)
         else:
             return result
 
@@ -237,7 +237,7 @@ class Dice:
         total = sum(results)
         text_results = f"+".join([f"[{result}]" for result in results])
         roll = f"{total} ({text_results})"
-        if self.modifier:
+        if self.modifier and self.modifier != "modifier":
             if self.operator and self.operator == "+":
                 total += self.modifier
                 roll = f"{total} ({text_results} + {self.modifier})"
@@ -258,12 +258,6 @@ class Dice:
 class ScalingDice:
     label: str
     scalingmap: Dict[int, Union[Dice, str]]
-
-
-# areaTags: S (sphere), N (cone), ST (single target), MT (multi target), H (hemisphere),
-# L (line), W (wall)
-# miscTags: SGT (seeing target), SCL (scalable), HL (healing influencing), SMN (summon),
-# PRM (permanent), TP (teleportation)
 
 
 class Spell:
@@ -307,11 +301,7 @@ class Spell:
                f"page='{self.page}', in_srd='{self.in_srd}', level='{self.level}', " \
                f"school='{self.school}', times='{self.times}', range='{self.range}', " \
                f"is_ritual='{self.is_ritual}', components='{self.components}', " \
-               f"durations='{self.durations}'), descriptions='{self.descriptions}'"
-        if self.higher_lvl_desc:
-            result += f", higher_lvl_desc={self.higher_lvl_desc}"
-        if self.scaling_dice:
-            result += f", scaling_dice={self.scaling_dice}"
+               f"durations='{self.durations}'"
         if self.misc_tags:
             result += f", misc_tags={self.misc_tags}"
         if self.aoe_tags:
@@ -332,6 +322,11 @@ class Spell:
             result += f", attack_type={self.attack_type}"
         if self.ability_checks:
             result += f", ability_checks={self.ability_checks}"
+        if self.higher_lvl_desc:
+            result += f", higher_lvl_desc={self.higher_lvl_desc}"
+        if self.scaling_dice:
+            result += f", scaling_dice={self.scaling_dice}"
+        result += f", descriptions='{self.descriptions}'"
 
         return result + ")"
 
@@ -469,7 +464,7 @@ class Spell:
 
 
 def parse(filename: str) -> None:
-    """Parse data from file designated by filename.
+    """Parse file designated by filename for spell data.
     """
     source = Path(f"data/{filename}")
 
