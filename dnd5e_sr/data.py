@@ -69,6 +69,10 @@ JSON_ATTRIBUTES = ["name", "source", "page", "srd", "level", "school", "time", "
                    "eldritchInvocations", "otherSources"]
 
 
+BOOKS = ["PHB", "MM", "DMG", "SCAG", "AL", "VGM", "XGE", "MTF", "GGR", "AI", "ERLW", "RMR", "EGW",
+         "MOT", "TCE"]
+
+
 class AttackType(Enum):
     NONE = 0
     MELEE = 1
@@ -260,6 +264,46 @@ class ScalingDice:
     scalingmap: Dict[int, Union[Dice, str]]
 
 
+@dataclass
+class Class:
+    name: str
+    source: str
+
+
+@dataclass
+class Subclass:
+    baseclass: Class
+    name: str
+    source: str
+    variant: Optional[str]
+
+
+@dataclass
+class ClassVariant:
+    class_: Class
+    variant_source: str
+
+
+@dataclass
+class Race:
+    name: str
+    source: str
+    basename: Optional[str]
+    basesource: Optional[str]
+
+
+@dataclass
+class Background:
+    name: str
+    source: str
+
+
+@dataclass
+class EldritchInvocation:
+    name: str
+    source: str
+
+
 class Spell:
     """Object representing a spell parsed from 5e.tools json data files acquired via
     https://get.5e.tools/ but also available on Github:
@@ -295,6 +339,7 @@ class Spell:
         self.saving_throws: List[str] = self._get_saving_throws()
         self.attack_type: AttackType = self._get_attack_type()
         self.ability_checks: List[str] = self._get_ability_checks()
+        self.classes, self.subclasses, self.class_variants = self._get_classes()
 
     def __repr__(self) -> str:
         result = f"{type(self).__name__}(name='{self.name}', source='{self.source}', " \
@@ -322,10 +367,16 @@ class Spell:
             result += f", attack_type={self.attack_type}"
         if self.ability_checks:
             result += f", ability_checks={self.ability_checks}"
-        if self.higher_lvl_desc:
-            result += f", higher_lvl_desc={self.higher_lvl_desc}"
+        if self.classes:
+            result += f", classes={self.classes}"
+        if self.subclasses:
+            result += f", subclasses={self.subclasses}"
+        if self.class_variants:
+            result += f", class_variants={self.class_variants}"
         if self.scaling_dice:
             result += f", scaling_dice={self.scaling_dice}"
+        if self.higher_lvl_desc:
+            result += f", higher_lvl_desc={self.higher_lvl_desc}"
         result += f", descriptions='{self.descriptions}'"
 
         return result + ")"
@@ -462,6 +513,38 @@ class Spell:
         checks = self._json.get("abilityCheck")
         return checks if checks else []
 
+    def _get_classes(self) -> Tuple[List[Class], List[Subclass], List[ClassVariant]]:
+        base = self._json.get("classes")
+        if not base:
+            return [], [], []
+
+        classes = base.get("fromClassList")
+        if classes:
+            classes = [Class(item["name"], item["source"]) for item in classes
+                       if item["source"] in BOOKS]
+        else:
+            classes = []
+
+        subclasses = base.get("fromSubclass")
+        if subclasses:
+            subclasses = [Subclass(Class(item["class"]["name"], item["class"]["source"]),
+                                   item["subclass"]["name"], item["subclass"]["source"],
+                                   item["subclass"].get("subSubclass")) for item in subclasses
+                          if item["class"]["source"] in BOOKS
+                          and item["subclass"]["source"] in BOOKS]
+        else:
+            subclasses = []
+
+        variants = base.get("fromClassListVariant")
+        if variants:
+            variants = [ClassVariant(Class(item["name"], item["source"]), item["definedInSource"])
+                        for item in variants
+                        if item["source"] in BOOKS and item["definedInSource"] in BOOKS]
+        else:
+            variants = []
+
+        return classes, subclasses, variants
+
 
 def parse(filename: str) -> None:
     """Parse file designated by filename for spell data.
@@ -523,8 +606,11 @@ def parse(filename: str) -> None:
         #                   in spell["entriesHigherLevel"][0].keys())]
 
         # counter = count(start=1)
-        # result = [(next(counter), spell["name"], spell["abilityCheck"]) for spell in spells
-        #           if spell.get("abilityCheck")]
+        # result = [(next(counter), spell["name"]) for spell in spells
+        #           if spell.get("classes") is not None and spell["classes"].get(
+        #         "fromClassListVariant") is not None
+        #           and any(item.get("definedInSource") is None
+        #                   for item in spell["classes"]["fromClassListVariant"])]
         #
         spells = [Spell(spell) for spell in spells]
 
