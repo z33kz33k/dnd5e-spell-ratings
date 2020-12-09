@@ -1,7 +1,7 @@
 """
 
     dnd5e_sr.data.py
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~~~~~~
 
     Parse spell data from 5e.tools JSON files.
 
@@ -340,6 +340,9 @@ class Spell:
         self.attack_type: AttackType = self._get_attack_type()
         self.ability_checks: List[str] = self._get_ability_checks()
         self.classes, self.subclasses, self.class_variants = self._get_classes()
+        self.races: List[Race] = self._get_races()
+        self.backgrounds: List[Background] = self._get_backgrounds()
+        self.eldritch_invocations: List[EldritchInvocation] = self._get_eldritch_ivocations()
 
     def __repr__(self) -> str:
         result = f"{type(self).__name__}(name='{self.name}', source='{self.source}', " \
@@ -373,13 +376,21 @@ class Spell:
             result += f", subclasses={self.subclasses}"
         if self.class_variants:
             result += f", class_variants={self.class_variants}"
+        if self.races:
+            result += f", races={self.races}"
+        if self.backgrounds:
+            result += f", backgrounds={self.backgrounds}"
+        if self.eldritch_invocations:
+            result += f", eldritch_invocations={self.eldritch_invocations}"
         if self.scaling_dice:
             result += f", scaling_dice={self.scaling_dice}"
         if self.higher_lvl_desc:
-            result += f", higher_lvl_desc={self.higher_lvl_desc}"
-        result += f", descriptions='{self.descriptions}'"
+            result += f", higher_lvl_desc={self.higher_lvl_desc}"; result += f", descriptions='{self.descriptions}'"
 
         return result + ")"
+
+    def __str__(self) -> str:
+        return self.name
 
     def _gettimes(self) -> List[Time]:
         return [Time(time["number"], time["unit"], time.get("condition"), False)
@@ -514,18 +525,18 @@ class Spell:
         return checks if checks else []
 
     def _get_classes(self) -> Tuple[List[Class], List[Subclass], List[ClassVariant]]:
-        base = self._json.get("classes")
-        if not base:
+        items = self._json.get("classes")
+        if not items:
             return [], [], []
 
-        classes = base.get("fromClassList")
+        classes = items.get("fromClassList")
         if classes:
             classes = [Class(item["name"], item["source"]) for item in classes
                        if item["source"] in BOOKS]
         else:
             classes = []
 
-        subclasses = base.get("fromSubclass")
+        subclasses = items.get("fromSubclass")
         if subclasses:
             subclasses = [Subclass(Class(item["class"]["name"], item["class"]["source"]),
                                    item["subclass"]["name"], item["subclass"]["source"],
@@ -535,7 +546,7 @@ class Spell:
         else:
             subclasses = []
 
-        variants = base.get("fromClassListVariant")
+        variants = items.get("fromClassListVariant")
         if variants:
             variants = [ClassVariant(Class(item["name"], item["source"]), item["definedInSource"])
                         for item in variants
@@ -545,65 +556,33 @@ class Spell:
 
         return classes, subclasses, variants
 
+    def _get_races(self) -> List[Race]:
+        items = self._json.get("races")
+        if items:
+            return [Race(item["name"], item["source"], item.get("baseName"), item.get(
+                "baseSource")) for item in items if item["source"] in BOOKS
+                    and item.get("baseSource") in BOOKS]
+        return []
 
-def parse(filename: str) -> None:
+    def _get_backgrounds(self) -> List[Background]:
+        items = self._json.get("backgrounds")
+        if items:
+            return [Background(item["name"], item["source"]) for item in items]
+        return []
+
+    def _get_eldritch_ivocations(self) -> List[EldritchInvocation]:
+        items = self._json.get("eldritchInvocations")
+        if items:
+            return [EldritchInvocation(item["name"], item["source"]) for item in items]
+        return []
+
+
+def parse_spells(filename: str) -> None:
     """Parse file designated by filename for spell data.
     """
-    source = Path(f"data/{filename}")
-
+    source = Path(f"data/5etools/{filename}")
     with source.open() as f:
         spells = json.load(f)["spell"]
-        # names = [spell["name"] for spell in spells if len(spell["time"]) == 1
-        #          and len(spell["time"][0].keys()) > 2]
-        # names = [spell["name"] for spell in spells
-        #          if spell["components"].get("m") is not None
-        #          and isinstance(spell["components"].get("m"), dict)
-        #          and len(spell["components"]["m"].keys()) > 3]
-        # names = [(spell["name"], spell["duration"][0]["duration"]) for spell in spells
-        #          if len(spell["duration"][0].keys()) > 1
-        #          and spell["duration"][0].get("duration") is not None
-        #          and len(spell["duration"][0]["duration"].keys()) > 2]
-        # names = [(spell["name"], spell["range"]["distance"]) for spell in spells
-        #          if len(spell["range"].keys()) == 2]
-        # names = [(spell["name"], spell["meta"]) for spell in spells
-        #          if spell.get("meta") is not None and [*spell["meta"].keys()][0] == "ritual"]
-        # compnames = [[*spell["components"].keys()] for spell in spells]
-        # compnames = [cn for cn in compnames if any(n not in ("v", "s", "m") for n in cn)]
-        # times = [(spell["name"], spell["time"]) for spell in spells]
-        # ranges = [(spell["name"], spell["range"]) for spell in spells if spell["range"].get(
-        #     "distance") is not None and "amount" not in spell["range"]["distance"].keys()]
-        # schools = [(spell["name"], spell["school"]) for spell in spells
-        #            if spell["school"]]
-        # comps = [(spell["name"], spell["components"]) for spell in spells]
-        # durations = [(spell["name"], spell["duration"]) for spell in spells]
-        # srd = [spell["name"] for spell in spells if spell.get("srd") is None]
-        # entries = [(spell["name"], spell["entries"]) for spell in spells
-        #            if any(type(e) is dict for e in spell["entries"])]
-        # entries = [(spell["name"], [n for n in spell["entries"]
-        #             if type(n) is dict and n["type"] == "table"])
-        #            for spell in spells
-        #            if any(type(e) is dict for e in spell["entries"])]
-        #
-        # counter = count(start=1)
-        # result = [(next(counter), spell["name"], spell["scalingLevelDice"]) for spell in spells
-        #           if spell.get("scalingLevelDice")
-        #           and type(spell["scalingLevelDice"]) is not dict]
-        # counter = count(start=1)
-        # result = [(next(counter), spell["name"], spell["areaTags"]) for spell in spells
-        #          if spell.get("areaTags")
-        #          and any(tag not in AOE_TAGS_MAP.keys() for tag in spell["areaTags"])]
-
-        # counter = count(start=1)
-        # result = [(next(counter), spell["name"], spell["miscTags"]) for spell in spells
-        #           if spell.get("miscTags")
-        #           and any(tag not in MISC_TAGS_MAP.keys() for tag in spell["miscTags"])]
-
-        # counter = count(start=1)
-        # result = [(next(counter), spell["name"], spell["entriesHigherLevel"][0]) for spell in
-        # spells
-        #           if spell.get("entriesHigherLevel")
-        #           and any(key not in ("entries", "name", "type") for key
-        #                   in spell["entriesHigherLevel"][0].keys())]
 
         # counter = count(start=1)
         # result = [(next(counter), spell["name"]) for spell in spells
@@ -617,3 +596,22 @@ def parse(filename: str) -> None:
     # pprint(result)
     #
     pprint(spells)
+
+
+def parse_races() -> None:
+    """Parse races.json for race data.
+    """
+    source = Path(f"data/5etools/races.json")
+    with source.open() as f:
+        races = json.load(f)["race"]
+
+    counter = count(start=1)
+    result = [(next(counter), race["name"], race["source"]) for race in races
+              if race["source"] in BOOKS and "_copy" not in race.keys()
+              and (race.get("additionalSpells") is not None
+                   or (race.get("subraces") is not None
+                       and any(sr.get("additionalSpells") is not None for sr in race["subraces"])))]
+
+    print(len(races))
+    pprint(result)
+

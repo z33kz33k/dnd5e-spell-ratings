@@ -6,18 +6,20 @@
 
 """
 
-from dnd5e_sr.data import parse
+from dnd5e_sr.data import parse_spells, parse_races
 
 
 def run():
-    parse("spells-ai.json")
-    parse("spells-egw.json")
-    parse("spells-ggr.json")
-    parse("spells-idrotf.json")
-    parse("spells-llk.json")
-    parse("spells-phb.json")
-    parse("spells-tce.json")
-    parse("spells-xge.json")
+    # parse_spells("spells-ai.json")
+    # parse_spells("spells-egw.json")
+    # parse_spells("spells-ggr.json")
+    # parse_spells("spells-idrotf.json")
+    # parse_spells("spells-llk.json")
+    # parse_spells("spells-phb.json")
+    # parse_spells("spells-tce.json")
+    # parse_spells("spells-xge.json")
+
+    parse_races()
 
 
 if __name__ == '__main__':
