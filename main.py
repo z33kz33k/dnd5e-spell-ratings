@@ -6,7 +6,8 @@
 
 """
 
-from dnd5e_sr.data import parse_spells, parse_races
+from dnd5e_sr.spell import parse_spells
+from dnd5e_sr.race import parse_races
 
 
 def run():

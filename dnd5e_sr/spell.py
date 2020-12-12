@@ -1,6 +1,6 @@
 """
 
-    dnd5e_sr.data.py
+    dnd5e_sr.spell.py
     ~~~~~~~~~~~~~~~~~
 
     Parse spell data from 5e.tools JSON files.
@@ -11,18 +11,14 @@
 
 # DEBUG
 from pprint import pprint
-from itertools import count
-
 
 from dataclasses import dataclass
 from enum import Enum
 import json
 from pathlib import Path
-from random import randint
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Dict, Tuple, Union
 
-# boolean key appears in JSON only if its value is 'true'
-Json = Dict[str, Any]
+from dnd5e_sr import BOOKS, Dice, Json
 
 
 SCHOOLSMAP = {
@@ -67,10 +63,6 @@ JSON_ATTRIBUTES = ["name", "source", "page", "srd", "level", "school", "time", "
                    "damageImmune", "damageVulnerable", "savingThrow", "spellAttack",
                    "abilityCheck", "miscTags", "areaTags", "classes", "races", "backgrounds",
                    "eldritchInvocations", "otherSources"]
-
-
-BOOKS = ["PHB", "MM", "DMG", "SCAG", "AL", "VGM", "XGE", "MTF", "GGR", "AI", "ERLW", "RMR", "EGW",
-         "MOT", "TCE"]
 
 
 class AttackType(Enum):
@@ -149,115 +141,6 @@ class DescriptionTable:
 Description = Union[str, List[str], DescriptionQuote, DescriptionTable, DescriptionTable]
 
 
-class Dice:
-    """A dice formula that can roll itself.
-    """
-    DIE_CHAR = "d"
-
-    def __init__(self, formula: str) -> None:
-        self._formula = formula
-        self.multiplier, self.die, self.operator, self.modifier = self._parse()
-
-    def _validate_input(self) -> None:
-        try:
-            index = self._formula.index(self.DIE_CHAR)
-        except ValueError:
-            raise ValueError(f"No '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
-
-        if index == len(self._formula) or not self._formula[index + 1].isdigit():
-            raise ValueError(f"Invalid formula: '{self._formula}'")
-
-        if self._formula.count(self.DIE_CHAR) > 1:
-            raise ValueError(f"More than one '{self.DIE_CHAR}' in dice formula: '{self._formula}'")
-
-    def _parse(self) -> Tuple[Optional[int], int, Optional[str], Optional[int]]:
-        """Parse the input formula for a multiplier, a die, an operator and a modifier.
-        """
-        self._validate_input()
-
-        multiplier, die = self._formula.split(self.DIE_CHAR)
-
-        if multiplier and "{" in multiplier:
-            multiplier = "multiplier"
-        else:
-            multiplier = int(multiplier) if multiplier else None
-
-        if "+" in die:
-            operator = "+"
-            die, modifier = die.split(operator)
-        elif "-" in die:
-            operator = "-"
-            die, modifier = die.split(operator)
-        else:
-            operator, modifier = None, None
-
-        die = int(die.strip())
-
-        if modifier:
-            if "{" in modifier:
-                modifier = "modifier"
-            else:
-                modifier = int(modifier.strip())
-
-        return multiplier, die, operator, modifier
-
-    @property
-    def formula(self) -> str:
-        """Return formula as parsed.
-        """
-        if self.multiplier == "multiplier":
-            multiplier = f"{self.multiplier}*"
-        else:
-            multiplier = self.multiplier if self.multiplier else ""
-        operator = self.operator if self.operator else ""
-        modifier = self.modifier if self.modifier else ""
-
-        return f"{multiplier}{self.DIE_CHAR}{self.die}{operator}{modifier}"
-
-    @property
-    def roll_results(self) -> List[int]:
-        """Return list of roll results.
-        """
-        multiplier = 0 if not self.multiplier or self.multiplier == "multipier" else self.multiplier
-        return [randint(1, self.die) for _ in range(multiplier)]
-
-    def roll(self) -> int:
-        """Roll a numerical result of the formula of this dice.
-        """
-        result = sum(self.roll_results)
-        if self.operator and self.operator == "+":
-            return result + (0 if not self.modifier or self.modifier == "modifier"
-                             else self.modifier)
-        elif self.operator and self.operator == "-":
-            return result - (0 if not self.modifier or self.modifier == "modifier"
-                             else self.modifier)
-        else:
-            return result
-
-    def roll_as_text(self) -> str:
-        """Roll a textual result of the formula of this dice.
-        """
-        results = self.roll_results
-        total = sum(results)
-        text_results = f"+".join([f"[{result}]" for result in results])
-        roll = f"{total} ({text_results})"
-        if self.modifier and self.modifier != "modifier":
-            if self.operator and self.operator == "+":
-                total += self.modifier
-                roll = f"{total} ({text_results} + {self.modifier})"
-            elif self.operator and self.operator == "-":
-                total -= self.modifier
-                roll = f"{total} ({text_results} - {self.modifier})"
-
-        return roll
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}('{self.formula}')"
-
-    def __str__(self) -> str:
-        return self.formula
-
-
 @dataclass
 class ScalingDice:
     label: str
@@ -304,6 +187,7 @@ class EldritchInvocation:
     source: str
 
 
+# boolean key appears in JSON only if its value is 'true'
 class Spell:
     """Object representing a spell parsed from 5e.tools json data files acquired via
     https://get.5e.tools/ but also available on Github:
@@ -385,7 +269,8 @@ class Spell:
         if self.scaling_dice:
             result += f", scaling_dice={self.scaling_dice}"
         if self.higher_lvl_desc:
-            result += f", higher_lvl_desc={self.higher_lvl_desc}"; result += f", descriptions='{self.descriptions}'"
+            result += f", higher_lvl_desc={self.higher_lvl_desc}"
+        result += f", descriptions='{self.descriptions}'"
 
         return result + ")"
 
@@ -423,7 +308,7 @@ class Spell:
                 time = Time(time["amount"], time["type"], None, time.get("upTo") is not None)
             terminations = duration.get("ends")
             duration = Duration(duration["type"], time, duration.get("concentration") is not None,
-                                terminations if terminations is not None else [])
+                                terminations if terminations else [])
 
             durations.append(duration)
 
@@ -512,7 +397,7 @@ class Spell:
 
     def _get_attack_type(self) -> AttackType:
         attack = self._json.get("spellAttack")
-        if attack is not None:
+        if attack:
             if attack[0] == "M":
                 return AttackType.MELEE
             else:
@@ -597,21 +482,4 @@ def parse_spells(filename: str) -> None:
     #
     pprint(spells)
 
-
-def parse_races() -> None:
-    """Parse races.json for race data.
-    """
-    source = Path(f"data/5etools/races.json")
-    with source.open() as f:
-        races = json.load(f)["race"]
-
-    counter = count(start=1)
-    result = [(next(counter), race["name"], race["source"]) for race in races
-              if race["source"] in BOOKS and "_copy" not in race.keys()
-              and (race.get("additionalSpells") is not None
-                   or (race.get("subraces") is not None
-                       and any(sr.get("additionalSpells") is not None for sr in race["subraces"])))]
-
-    print(len(races))
-    pprint(result)
 
